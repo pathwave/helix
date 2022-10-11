@@ -213,12 +213,16 @@ impl MappableCommand {
         move_next_long_word_start, "Move to start of next long word",
         move_prev_long_word_start, "Move to start of previous long word",
         move_next_long_word_end, "Move to end of next long word",
+        move_next_boundary, "Move to next word or punctuation",
+        move_prev_boundary, "Move to previous word or punctuation",
         extend_next_word_start, "Extend to start of next word",
         extend_prev_word_start, "Extend to start of previous word",
         extend_next_long_word_start, "Extend to start of next long word",
         extend_prev_long_word_start, "Extend to start of previous long word",
         extend_next_long_word_end, "Extend to end of next long word",
         extend_next_word_end, "Extend to end of next word",
+        extend_next_boundary, "Extend to next word or punctuation",
+        extend_prev_boundary, "Extend to prev word or punctuation",
         find_till_char, "Move till next occurrence of char",
         find_next_char, "Move to next occurrence of char",
         extend_till_char, "Extend till next occurrence of char",
@@ -950,6 +954,14 @@ fn move_next_long_word_end(cx: &mut Context) {
     move_word_impl(cx, movement::move_next_long_word_end)
 }
 
+fn move_next_boundary(cx: &mut Context) {
+    move_word_impl(cx, movement::move_next_boundary);
+}
+
+fn move_prev_boundary(cx: &mut Context) {
+    move_word_impl(cx, movement::move_prev_boundary);
+}
+
 fn goto_para_impl<F>(cx: &mut Context, move_fn: F)
 where
     F: Fn(RopeSlice, Range, usize, Movement) -> Range + 'static,
@@ -1090,6 +1102,14 @@ fn extend_prev_long_word_start(cx: &mut Context) {
 
 fn extend_next_long_word_end(cx: &mut Context) {
     extend_word_impl(cx, movement::move_next_long_word_end)
+}
+
+fn extend_next_boundary(cx: &mut Context) {
+    extend_word_impl(cx, movement::move_next_boundary);
+}
+
+fn extend_prev_boundary(cx: &mut Context) {
+    extend_word_impl(cx, movement::move_prev_boundary);
 }
 
 fn will_find_char<F>(cx: &mut Context, search_fn: F, inclusive: bool, extend: bool)

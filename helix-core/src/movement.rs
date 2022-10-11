@@ -108,12 +108,21 @@ pub fn move_prev_word_end(slice: RopeSlice, range: Range, count: usize) -> Range
     word_move(slice, range, count, WordMotionTarget::PrevWordEnd)
 }
 
+pub fn move_next_boundary(slice: RopeSlice, range: Range, count: usize) -> Range {
+    word_move(slice, range, count, WordMotionTarget::NextBoundary)
+}
+
+pub fn move_prev_boundary(slice: RopeSlice, range: Range, count: usize) -> Range {
+    word_move(slice, range, count, WordMotionTarget::PrevBoundary)
+}
+
 fn word_move(slice: RopeSlice, range: Range, count: usize, target: WordMotionTarget) -> Range {
     let is_prev = matches!(
         target,
         WordMotionTarget::PrevWordStart
             | WordMotionTarget::PrevLongWordStart
             | WordMotionTarget::PrevWordEnd
+            | WordMotionTarget::PrevBoundary
     );
 
     // Special-case early-out.
@@ -276,6 +285,8 @@ pub enum WordMotionTarget {
     NextLongWordStart,
     NextLongWordEnd,
     PrevLongWordStart,
+    NextBoundary,
+    PrevBoundary,
 }
 
 pub trait CharHelpers {
@@ -292,6 +303,7 @@ impl CharHelpers for Chars<'_> {
             WordMotionTarget::PrevWordStart
                 | WordMotionTarget::PrevLongWordStart
                 | WordMotionTarget::PrevWordEnd
+                | WordMotionTarget::PrevBoundary
         );
 
         // Reverse the iterator if needed for the motion direction.
@@ -385,6 +397,13 @@ fn reached_target(target: WordMotionTarget, prev_ch: char, next_ch: char) -> boo
         WordMotionTarget::NextLongWordEnd | WordMotionTarget::PrevLongWordStart => {
             is_long_word_boundary(prev_ch, next_ch)
                 && (!prev_ch.is_whitespace() || char_is_line_ending(next_ch))
+        }
+        WordMotionTarget::NextBoundary | WordMotionTarget::PrevBoundary => {
+            let cat = categorize_char(prev_ch);
+            (is_word_boundary(prev_ch, next_ch)
+                && cat != CharCategory::Whitespace
+                && cat != CharCategory::Eol)
+                || cat == CharCategory::Punctuation
         }
     }
 }
