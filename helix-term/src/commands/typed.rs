@@ -483,7 +483,7 @@ fn earlier(
     let uk = args.join(" ").parse::<UndoKind>().map_err(|s| anyhow!(s))?;
 
     let (view, doc) = current!(cx.editor);
-    let success = doc.earlier(view.id, uk);
+    let success = doc.earlier(view, uk);
     if !success {
         cx.editor.set_status("Already at oldest change");
     }
@@ -502,7 +502,7 @@ fn later(
 
     let uk = args.join(" ").parse::<UndoKind>().map_err(|s| anyhow!(s))?;
     let (view, doc) = current!(cx.editor);
-    let success = doc.later(view.id, uk);
+    let success = doc.later(view, uk);
     if !success {
         cx.editor.set_status("Already at newest change");
     }
@@ -2071,7 +2071,7 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         TypableCommand {
             name: "insert-output",
             aliases: &[],
-            doc: "Run shell command, inserting output after each selection.",
+            doc: "Run shell command, inserting output before each selection.",
             fun: insert_output,
             completer: None,
         },

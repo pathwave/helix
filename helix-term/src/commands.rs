@@ -2242,7 +2242,7 @@ fn append_mode(cx: &mut Context) {
         .iter()
         .last()
         .expect("selection should always have at least one range");
-    if !last_range.is_empty() && last_range.head == end {
+    if !last_range.is_empty() && last_range.to() == end {
         let transaction = Transaction::change(
             doc.text(),
             [(end, end, Some(doc.line_ending.as_str().into()))].into_iter(),
@@ -2446,11 +2446,11 @@ impl ui::menu::Item for MappableCommand {
         match self {
             MappableCommand::Typable { doc, name, .. } => match keymap.get(name as &String) {
                 Some(bindings) => format!("{} ({}) [{}]", doc, fmt_binding(bindings), name).into(),
-                None => doc.as_str().into(),
+                None => format!("{} [{}]", doc, name).into(),
             },
             MappableCommand::Static { doc, name, .. } => match keymap.get(*name) {
                 Some(bindings) => format!("{} ({}) [{}]", doc, fmt_binding(bindings), name).into(),
-                None => (*doc).into(),
+                None => format!("{} [{}]", doc, name).into(),
             },
         }
     }
@@ -3278,7 +3278,7 @@ fn undo(cx: &mut Context) {
     let count = cx.count();
     let (view, doc) = current!(cx.editor);
     for _ in 0..count {
-        if !doc.undo(view.id) {
+        if !doc.undo(view) {
             cx.editor.set_status("Already at oldest change");
             break;
         }
@@ -3289,7 +3289,7 @@ fn redo(cx: &mut Context) {
     let count = cx.count();
     let (view, doc) = current!(cx.editor);
     for _ in 0..count {
-        if !doc.redo(view.id) {
+        if !doc.redo(view) {
             cx.editor.set_status("Already at newest change");
             break;
         }
@@ -3301,7 +3301,7 @@ fn earlier(cx: &mut Context) {
     let (view, doc) = current!(cx.editor);
     for _ in 0..count {
         // rather than doing in batch we do this so get error halfway
-        if !doc.earlier(view.id, UndoKind::Steps(1)) {
+        if !doc.earlier(view, UndoKind::Steps(1)) {
             cx.editor.set_status("Already at oldest change");
             break;
         }
@@ -3313,7 +3313,7 @@ fn later(cx: &mut Context) {
     let (view, doc) = current!(cx.editor);
     for _ in 0..count {
         // rather than doing in batch we do this so get error halfway
-        if !doc.later(view.id, UndoKind::Steps(1)) {
+        if !doc.later(view, UndoKind::Steps(1)) {
             cx.editor.set_status("Already at newest change");
             break;
         }
@@ -3365,9 +3365,15 @@ fn yank_joined_to_clipboard_impl(
         .map(Cow::into_owned)
         .collect();
 
+    let clipboard_text = match clipboard_type {
+        ClipboardType::Clipboard => "system clipboard",
+        ClipboardType::Selection => "primary clipboard",
+    };
+
     let msg = format!(
-        "joined and yanked {} selection(s) to system clipboard",
+        "joined and yanked {} selection(s) to {}",
         values.len(),
+        clipboard_text,
     );
 
     let joined = values.join(separator);
@@ -3396,6 +3402,11 @@ fn yank_main_selection_to_clipboard_impl(
     let (view, doc) = current!(editor);
     let text = doc.text().slice(..);
 
+    let message_text = match clipboard_type {
+        ClipboardType::Clipboard => "yanked main selection to system clipboard",
+        ClipboardType::Selection => "yanked main selection to primary clipboard",
+    };
+
     let value = doc.selection(view.id).primary().fragment(text);
 
     if let Err(e) = editor
@@ -3405,7 +3416,7 @@ fn yank_main_selection_to_clipboard_impl(
         bail!("Couldn't set system clipboard content: {}", e);
     }
 
-    editor.set_status("yanked main selection to system clipboard");
+    editor.set_status(message_text);
     Ok(())
 }
 
