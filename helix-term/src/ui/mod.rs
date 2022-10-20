@@ -10,6 +10,7 @@ pub mod overlay;
 mod picker;
 pub mod popup;
 mod prompt;
+mod refactor;
 mod spinner;
 mod statusline;
 mod text;
@@ -24,6 +25,7 @@ pub use menu::Menu;
 pub use picker::{DynamicPicker, FileLocation, FilePicker, Picker};
 pub use popup::Popup;
 pub use prompt::{Prompt, PromptEvent};
+pub use refactor::RefactorView;
 pub use spinner::{ProgressSpinners, Spinner};
 pub use text::Text;
 

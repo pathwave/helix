@@ -260,6 +260,7 @@ impl MappableCommand {
         search_selection, "Use current selection as search pattern",
         make_search_word_bounded, "Modify current search to make it word bounded",
         global_search, "Global search in workspace folder",
+        global_refactor, "Global refactoring in workspace folder",
         extend_line, "Select current line, if already selected, extend to another line based on the anchor",
         extend_line_below, "Select current line, if already selected, extend to next line",
         extend_line_above, "Select current line, if already selected, extend to previous line",
@@ -2129,6 +2130,188 @@ fn global_search(cx: &mut Context) {
         Ok(call)
     };
     cx.jobs.callback(show_picker);
+}
+fn global_refactor(cx: &mut Context) {
+    let (all_matches_sx, all_matches_rx) =
+        tokio::sync::mpsc::unbounded_channel::<(PathBuf, usize, String)>();
+    let config = cx.editor.config();
+    let smart_case = config.search.smart_case;
+    let file_picker_config = config.file_picker.clone();
+
+    let reg = cx.register.unwrap_or('/');
+
+    // Restrict to current file type if possible
+    let file_extension = doc!(cx.editor).path().and_then(|f| f.extension());
+    let file_glob = if let Some(file_glob) = file_extension.and_then(|f| f.to_str()) {
+        let mut tb = ignore::types::TypesBuilder::new();
+        tb.add("p", &(String::from("*.") + file_glob))
+            .ok()
+            .and_then(|_| {
+                tb.select("all");
+                tb.build().ok()
+            })
+    } else {
+        None
+    };
+
+    let completions = search_completions(cx, Some(reg));
+    ui::regex_prompt(
+        cx,
+        "global-refactor:".into(),
+        Some(reg),
+        move |_editor: &Editor, input: &str| {
+            completions
+                .iter()
+                .filter(|comp| comp.starts_with(input))
+                .map(|comp| (0.., std::borrow::Cow::Owned(comp.clone())))
+                .collect()
+        },
+        move |editor, regex, event| {
+            if event != PromptEvent::Validate {
+                return;
+            }
+
+            if let Ok(matcher) = RegexMatcherBuilder::new()
+                .case_smart(smart_case)
+                .build(regex.as_str())
+            {
+                let searcher = SearcherBuilder::new()
+                    .binary_detection(BinaryDetection::quit(b'\x00'))
+                    .build();
+
+                let mut checked = HashSet::<PathBuf>::new();
+                let file_extension = editor.documents[&editor.tree.get(editor.tree.focus).doc]
+                    .path()
+                    .and_then(|f| f.extension());
+                for doc in editor.documents() {
+                    searcher
+                        .clone()
+                        .search_slice(
+                            matcher.clone(),
+                            doc.text().to_string().as_bytes(),
+                            sinks::UTF8(|line_num, matched| {
+                                if let Some(path) = doc.path() {
+                                    if let Some(extension) = path.extension() {
+                                        if let Some(file_extension) = file_extension {
+                                            if file_extension == extension {
+                                                all_matches_sx
+                                                    .send((
+                                                        path.clone(),
+                                                        line_num as usize - 1,
+                                                        String::from(
+                                                            matched
+                                                                .strip_suffix("\r\n")
+                                                                .or(matched.strip_suffix("\n"))
+                                                                .unwrap_or(matched),
+                                                        ),
+                                                    ))
+                                                    .unwrap();
+                                            }
+                                        }
+                                    }
+                                    // Exclude from file search
+                                    checked.insert(path.clone());
+                                }
+                                Ok(true)
+                            }),
+                        )
+                        .ok();
+                }
+
+                let search_root = std::env::current_dir()
+                    .expect("Global search error: Failed to get current dir");
+                let mut wb = WalkBuilder::new(search_root);
+                wb.hidden(file_picker_config.hidden)
+                    .parents(file_picker_config.parents)
+                    .ignore(file_picker_config.ignore)
+                    .git_ignore(file_picker_config.git_ignore)
+                    .git_global(file_picker_config.git_global)
+                    .git_exclude(file_picker_config.git_exclude)
+                    .max_depth(file_picker_config.max_depth);
+                if let Some(file_glob) = &file_glob {
+                    wb.types(file_glob.clone());
+                }
+                wb.build_parallel().run(|| {
+                    let mut searcher = searcher.clone();
+                    let matcher = matcher.clone();
+                    let all_matches_sx = all_matches_sx.clone();
+                    let checked = checked.clone();
+                    Box::new(move |entry: Result<DirEntry, ignore::Error>| -> WalkState {
+                        let entry = match entry {
+                            Ok(entry) => entry,
+                            Err(_) => return WalkState::Continue,
+                        };
+
+                        match entry.file_type() {
+                            Some(entry) if entry.is_file() => {}
+                            // skip everything else
+                            _ => return WalkState::Continue,
+                        };
+
+                        let result = searcher.search_path(
+                            &matcher,
+                            entry.path(),
+                            sinks::UTF8(|line_num, matched| {
+                                let path = entry.clone().into_path();
+                                if !checked.contains(&path) {
+                                    all_matches_sx
+                                        .send((
+                                            path,
+                                            line_num as usize - 1,
+                                            String::from(
+                                                matched
+                                                    .strip_suffix("\r\n")
+                                                    .or(matched.strip_suffix("\n"))
+                                                    .unwrap_or(matched),
+                                            ),
+                                        ))
+                                        .unwrap();
+                                }
+                                Ok(true)
+                            }),
+                        );
+
+                        if let Err(err) = result {
+                            log::error!("Global search error: {}, {}", entry.path().display(), err);
+                        }
+                        WalkState::Continue
+                    })
+                });
+            }
+        },
+    );
+
+    let show_refactor = async move {
+        let all_matches: Vec<(PathBuf, usize, String)> =
+            UnboundedReceiverStream::new(all_matches_rx).collect().await;
+        let call: job::Callback =
+            Box::new(move |editor: &mut Editor, compositor: &mut Compositor| {
+                if all_matches.is_empty() {
+                    editor.set_status("No matches found");
+                    return;
+                }
+                let mut document_data: HashMap<PathBuf, Vec<(usize, String)>> = HashMap::new();
+                for (path, line, text) in all_matches {
+                    if let Some(vec) = document_data.get_mut(&path) {
+                        vec.push((line, text));
+                    } else {
+                        let v = Vec::from([(line, text)]);
+                        document_data.insert(path, v);
+                    }
+                }
+
+                let editor_view = compositor.find::<ui::EditorView>().unwrap();
+                let language_id = doc!(editor)
+                    .language_id()
+                    .and_then(|language_id| Some(String::from(language_id)));
+
+                let re_view =
+                    ui::RefactorView::new(document_data, editor, editor_view, language_id);
+                compositor.push(Box::new(re_view));
+            });
+        Ok(call)
+    };
+    cx.jobs.callback(show_refactor);
 }
 
 enum Extend {
