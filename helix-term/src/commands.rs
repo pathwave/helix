@@ -2284,8 +2284,8 @@ fn global_refactor(cx: &mut Context) {
     let show_refactor = async move {
         let all_matches: Vec<(PathBuf, usize, String)> =
             UnboundedReceiverStream::new(all_matches_rx).collect().await;
-        let call: job::Callback =
-            Box::new(move |editor: &mut Editor, compositor: &mut Compositor| {
+        let call: job::Callback = Callback::EditorCompositor(Box::new(
+            move |editor: &mut Editor, compositor: &mut Compositor| {
                 if all_matches.is_empty() {
                     editor.set_status("No matches found");
                     return;
@@ -2308,7 +2308,8 @@ fn global_refactor(cx: &mut Context) {
                 let re_view =
                     ui::RefactorView::new(document_data, editor, editor_view, language_id);
                 compositor.push(Box::new(re_view));
-            });
+            },
+        ));
         Ok(call)
     };
     cx.jobs.callback(show_refactor);

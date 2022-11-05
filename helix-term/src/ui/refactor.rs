@@ -258,19 +258,21 @@ impl RefactorView {
         offset: helix_core::Position,
     ) {
         let mut start = 0;
+        let mut count = 0;
         for (key, value) in &self.matches {
             for (line, _) in value {
                 if start >= offset.row {
                     let text = key.display().to_string() + ":" + line.to_string().as_str();
                     surface.set_string_truncated(
                         area.x as u16,
-                        area.y + start as u16,
+                        area.y + count as u16,
                         &text,
                         15,
                         |_| Style::default().fg(helix_view::theme::Color::Magenta),
                         true,
                         true,
                     );
+                    count += 1;
                 }
                 start += 1;
             }
@@ -351,7 +353,6 @@ impl Component for RefactorView {
             },
             _ => (),
         }
-
         EventResult::Ignored(None)
     }
 
