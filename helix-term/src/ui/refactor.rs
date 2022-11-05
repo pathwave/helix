@@ -261,7 +261,7 @@ impl RefactorView {
         let mut count = 0;
         for (key, value) in &self.matches {
             for (line, _) in value {
-                if start >= offset.row {
+                if start >= offset.row && area.y + count < area.height {
                     let text = key.display().to_string() + ":" + line.to_string().as_str();
                     surface.set_string_truncated(
                         area.x as u16,
@@ -358,9 +358,9 @@ impl Component for RefactorView {
 
     fn render(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
         let view = view_mut!(cx.editor);
-        let area = area.clip_bottom(1);
-        view.area = area;
-        surface.clear_with(area, cx.editor.theme.get("ui.background"));
+        let view_area = area.clip_bottom(2);
+        view.area = view_area;
+        surface.clear_with(view_area, cx.editor.theme.get("ui.background"));
 
         self.render_view(&cx.editor, surface);
         if cx.editor.config().auto_info {
