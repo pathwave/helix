@@ -40,6 +40,8 @@ const DEFAULT_INDENT: IndentStyle = IndentStyle::Tabs;
 
 pub const SCRATCH_BUFFER_NAME: &str = "[scratch]";
 
+pub const REFACTOR_BUFFER_NAME: &str = "[refactor]";
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Mode {
     Normal = 0,
@@ -102,6 +104,15 @@ pub struct DocumentSavedEvent {
 pub type DocumentSavedEventResult = Result<DocumentSavedEvent, anyhow::Error>;
 pub type DocumentSavedEventFuture = BoxFuture<'static, DocumentSavedEventResult>;
 
+#[derive(Clone)]
+pub enum DocumentType {
+    File,
+    Refactor {
+        matches: HashMap<PathBuf, Vec<(usize, String)>>,
+        line_map: HashMap<(PathBuf, usize), usize>,
+    },
+}
+
 pub struct Document {
     pub(crate) id: DocumentId,
     text: Rope,
@@ -143,6 +154,8 @@ pub struct Document {
     language_server: Option<Arc<helix_lsp::Client>>,
 
     diff_handle: Option<DiffHandle>,
+
+    pub document_type: DocumentType,
 }
 
 use std::{fmt, mem};
@@ -387,6 +400,44 @@ impl Document {
             language_server: None,
             diff_handle: None,
             config,
+            document_type: DocumentType::File,
+        }
+    }
+
+    pub fn refactor(
+        text: Rope,
+        matches: HashMap<PathBuf, Vec<(usize, String)>>,
+        line_map: HashMap<(PathBuf, usize), usize>,
+        encoding: Option<&'static encoding::Encoding>,
+        config: Arc<dyn DynAccess<Config>>,
+    ) -> Self {
+        let encoding = encoding.unwrap_or(encoding::UTF_8);
+        let changes = ChangeSet::new(&text);
+        let old_state = None;
+
+        Self {
+            id: DocumentId::default(),
+            path: None,
+            encoding,
+            text,
+            selections: HashMap::default(),
+            indent_style: DEFAULT_INDENT,
+            line_ending: DEFAULT_LINE_ENDING,
+            restore_cursor: false,
+            syntax: None,
+            language: None,
+            changes,
+            old_state,
+            diagnostics: Vec::new(),
+            version: 0,
+            history: Cell::new(History::default()),
+            savepoint: None,
+            last_saved_revision: 0,
+            modified_since_accessed: false,
+            language_server: None,
+            diff_handle: None,
+            config,
+            document_type: DocumentType::Refactor { matches, line_map },
         }
     }
     pub fn default(config: Arc<dyn DynAccess<Config>>) -> Self {
@@ -987,16 +1038,24 @@ impl Document {
 
     /// If there are unsaved modifications.
     pub fn is_modified(&self) -> bool {
-        let history = self.history.take();
-        let current_revision = history.current_revision();
-        self.history.set(history);
-        log::debug!(
-            "id {} modified - last saved: {}, current: {}",
-            self.id,
-            self.last_saved_revision,
-            current_revision
-        );
-        current_revision != self.last_saved_revision || !self.changes.is_empty()
+        match self.document_type {
+            DocumentType::File => {
+                let history = self.history.take();
+                let current_revision = history.current_revision();
+                self.history.set(history);
+                log::debug!(
+                    "id {} modified - last saved: {}, current: {}",
+                    self.id,
+                    self.last_saved_revision,
+                    current_revision
+                );
+                current_revision != self.last_saved_revision || !self.changes.is_empty()
+            }
+            DocumentType::Refactor {
+                matches: _,
+                line_map: _,
+            } => false,
+        }
     }
 
     /// Save modifications to history, and so [`Self::is_modified`] will return false.

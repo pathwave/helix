@@ -31,7 +31,7 @@ use helix_core::{
 };
 use helix_view::{
     clipboard::ClipboardType,
-    document::{FormatterError, Mode, SCRATCH_BUFFER_NAME},
+    document::{FormatterError, Mode, REFACTOR_BUFFER_NAME, SCRATCH_BUFFER_NAME},
     editor::{Action, Motion},
     info::Info,
     input::KeyEvent,
@@ -2154,6 +2154,8 @@ fn global_refactor(cx: &mut Context) {
         None
     };
 
+    let encoding = Some(doc!(cx.editor).encoding());
+
     let completions = search_completions(cx, Some(reg));
     ui::regex_prompt(
         cx,
@@ -2201,7 +2203,9 @@ fn global_refactor(cx: &mut Context) {
                                                         String::from(
                                                             matched
                                                                 .strip_suffix("\r\n")
-                                                                .or(matched.strip_suffix("\n"))
+                                                                .or_else(|| {
+                                                                    matched.strip_suffix('\n')
+                                                                })
                                                                 .unwrap_or(matched),
                                                         ),
                                                     ))
@@ -2261,7 +2265,7 @@ fn global_refactor(cx: &mut Context) {
                                             String::from(
                                                 matched
                                                     .strip_suffix("\r\n")
-                                                    .or(matched.strip_suffix("\n"))
+                                                    .or_else(|| matched.strip_suffix('\n'))
                                                     .unwrap_or(matched),
                                             ),
                                         ))
@@ -2284,32 +2288,43 @@ fn global_refactor(cx: &mut Context) {
     let show_refactor = async move {
         let all_matches: Vec<(PathBuf, usize, String)> =
             UnboundedReceiverStream::new(all_matches_rx).collect().await;
-        let call: job::Callback = Callback::EditorCompositor(Box::new(
-            move |editor: &mut Editor, compositor: &mut Compositor| {
-                if all_matches.is_empty() {
-                    editor.set_status("No matches found");
-                    return;
+        let call: job::Callback = Callback::Editor(Box::new(move |editor: &mut Editor| {
+            if all_matches.is_empty() {
+                editor.set_status("No matches found");
+                return;
+            }
+            let mut matches: HashMap<PathBuf, Vec<(usize, String)>> = HashMap::new();
+            for (path, line, text) in all_matches {
+                if let Some(vec) = matches.get_mut(&path) {
+                    vec.push((line, text));
+                } else {
+                    let v = Vec::from([(line, text)]);
+                    matches.insert(path, v);
                 }
-                let mut document_data: HashMap<PathBuf, Vec<(usize, String)>> = HashMap::new();
-                for (path, line, text) in all_matches {
-                    if let Some(vec) = document_data.get_mut(&path) {
-                        vec.push((line, text));
-                    } else {
-                        let v = Vec::from([(line, text)]);
-                        document_data.insert(path, v);
-                    }
+            }
+
+            let language_id = doc!(editor).language_id().map(String::from);
+
+            let mut doc_text = Rope::new();
+            let mut line_map = HashMap::new();
+
+            let mut count = 0;
+            for (key, value) in &matches {
+                for (line, text) in value {
+                    doc_text.insert(doc_text.len_chars(), text);
+                    doc_text.insert(doc_text.len_chars(), "\n");
+                    line_map.insert((key.clone(), *line), count);
+                    count += 1;
                 }
-
-                let editor_view = compositor.find::<ui::EditorView>().unwrap();
-                let language_id = doc!(editor)
-                    .language_id()
-                    .and_then(|language_id| Some(String::from(language_id)));
-
-                let re_view =
-                    ui::RefactorView::new(document_data, editor, editor_view, language_id);
-                compositor.push(Box::new(re_view));
-            },
-        ));
+            }
+            doc_text.split_off(doc_text.len_chars().saturating_sub(1));
+            let mut doc = Document::refactor(doc_text, matches, line_map, encoding);
+            if let Some(language_id) = language_id {
+                doc.set_language_by_language_id(&language_id, editor.syn_loader.clone())
+                    .ok();
+            };
+            editor.new_file_from_document(Action::Replace, doc);
+        }));
         Ok(call)
     };
     cx.jobs.callback(show_refactor);
@@ -2616,6 +2631,7 @@ fn buffer_picker(cx: &mut Context) {
         path: Option<PathBuf>,
         is_modified: bool,
         is_current: bool,
+        is_refactor: bool,
     }
 
     impl ui::menu::Item for BufferMeta {
@@ -2626,9 +2642,13 @@ fn buffer_picker(cx: &mut Context) {
                 .path
                 .as_deref()
                 .map(helix_core::path::get_relative_path);
-            let path = match path.as_deref().and_then(Path::to_str) {
-                Some(path) => path,
-                None => SCRATCH_BUFFER_NAME,
+            let path = if self.is_refactor {
+                REFACTOR_BUFFER_NAME
+            } else {
+                match path.as_deref().and_then(Path::to_str) {
+                    Some(path) => path,
+                    None => SCRATCH_BUFFER_NAME,
+                }
             };
 
             let mut flags = String::new();
@@ -2648,6 +2668,13 @@ fn buffer_picker(cx: &mut Context) {
         path: doc.path().cloned(),
         is_modified: doc.is_modified(),
         is_current: doc.id() == current,
+        is_refactor: matches!(
+            &doc.document_type,
+            helix_view::document::DocumentType::Refactor {
+                matches: _,
+                line_map: _
+            }
+        ),
     };
 
     let picker = FilePicker::new(

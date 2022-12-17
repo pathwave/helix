@@ -1952,6 +1952,75 @@ fn run_shell_command(
     Ok(())
 }
 
+fn apply_refactor(
+    cx: &mut compositor::Context,
+    _args: &[Cow<str>],
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let document_type = doc!(cx.editor).document_type.clone();
+
+    match &document_type {
+        helix_view::document::DocumentType::File => {}
+        helix_view::document::DocumentType::Refactor { matches, line_map } => {
+            let refactor_id = doc!(cx.editor).id();
+            let replace_text = doc!(cx.editor).text().clone();
+            let view = view!(cx.editor).clone();
+            let mut documents: usize = 0;
+            let mut count: usize = 0;
+            for (key, value) in matches {
+                let mut changes = Vec::<(usize, usize, String)>::new();
+                for (line, text) in value {
+                    if let Some(re_line) = line_map.get(&(key.clone(), *line)) {
+                        let mut replace = replace_text
+                            .get_line(*re_line)
+                            .unwrap_or_else(|| "\n".into())
+                            .to_string()
+                            .clone();
+                        replace = replace.strip_suffix('\n').unwrap_or(&replace).to_string();
+                        if text != &replace {
+                            changes.push((*line, text.chars().count(), replace));
+                        }
+                    }
+                }
+                if !changes.is_empty() {
+                    if let Some(doc) = cx
+                        .editor
+                        .open(key, Action::Load)
+                        .ok()
+                        .and_then(|id| cx.editor.document_mut(id))
+                    {
+                        documents += 1;
+                        let mut applychanges = Vec::<(usize, usize, Option<Tendril>)>::new();
+                        for (line, length, text) in changes {
+                            if doc.text().len_lines() > line {
+                                let start = doc.text().line_to_char(line);
+                                applychanges.push((
+                                    start,
+                                    start + length,
+                                    Some(Tendril::from(text.to_string())),
+                                ));
+                                count += 1;
+                            }
+                        }
+                        let transaction = Transaction::change(doc.text(), applychanges.into_iter());
+                        doc.apply(&transaction, view.id);
+                    }
+                }
+            }
+            cx.editor.set_status(format!(
+                "Refactored {} documents, {} lines changed.",
+                documents, count
+            ));
+            cx.editor.close_document(refactor_id, true).ok();
+        }
+    }
+    Ok(())
+}
+
 pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         TypableCommand {
             name: "quit",
@@ -2473,6 +2542,13 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
             doc: "Run a shell command",
             fun: run_shell_command,
             completer: Some(completers::filename),
+        },
+        TypableCommand {
+            name: "apply-refactoring",
+            aliases: &["ar"],
+            doc: "Applies refactoring",
+            fun: apply_refactor,
+            completer: None,
         },
     ];
 

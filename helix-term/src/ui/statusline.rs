@@ -1,7 +1,7 @@
 use helix_core::{coords_at_pos, encoding, Position};
 use helix_lsp::lsp::DiagnosticSeverity;
 use helix_view::{
-    document::{Mode, SCRATCH_BUFFER_NAME},
+    document::{Mode, REFACTOR_BUFFER_NAME, SCRATCH_BUFFER_NAME},
     graphics::Rect,
     theme::Style,
     Document, Editor, View,
@@ -412,16 +412,24 @@ where
     F: Fn(&mut RenderContext, String, Option<Style>) + Copy,
 {
     let title = {
-        let rel_path = context.doc.relative_path();
-        let path = rel_path
-            .as_ref()
-            .map(|p| p.to_string_lossy())
-            .unwrap_or_else(|| SCRATCH_BUFFER_NAME.into());
-        format!(
-            " {}{} ",
-            path,
-            if context.doc.is_modified() { "[+]" } else { "" }
-        )
+        match &context.doc.document_type {
+            helix_view::document::DocumentType::File => {
+                let rel_path = context.doc.relative_path();
+                let path = rel_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy())
+                    .unwrap_or_else(|| SCRATCH_BUFFER_NAME.into());
+                format!(
+                    " {}{} ",
+                    if context.doc.is_modified() { "[+]" } else { "" },
+                    path
+                )
+            }
+            helix_view::document::DocumentType::Refactor {
+                matches: _,
+                line_map: _,
+            } => REFACTOR_BUFFER_NAME.into(),
+        }
     };
 
     write(context, title, None);
