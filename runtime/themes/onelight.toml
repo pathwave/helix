@@ -92,6 +92,10 @@
 "ui.virtual.indent-guide" = { fg = "grey-500" }
 "ui.virtual.ruler" = { bg = "light-white" }
 "ui.virtual.whitespace" = { fg = "light-white" }
+"ui.virtual.jump.single" = { fg = "#ff007c", modifiers = ["bold"] }
+"ui.virtual.jump.multi.first" = { fg = "#00dfff", modifiers = ["bold"] }
+"ui.virtual.jump.multi.rest" = "#2b8db3"
+"ui.virtual.jump.dim" = "#666666"
 
 "ui.linenr" = { fg = "grey-500" }
 "ui.linenr.selected" = { fg = "black", modifiers = ["dim"] }
