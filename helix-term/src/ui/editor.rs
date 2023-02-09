@@ -35,8 +35,6 @@ use tui::buffer::Buffer as Surface;
 use super::statusline;
 use super::{document::LineDecoration, lsp::SignatureHelp};
 
-const REFACTOR_NAME_WIDTH: u16 = 20;
-
 pub struct EditorView {
     pub keymaps: Keymaps,
     on_next_key: Option<Box<dyn FnOnce(&mut commands::Context, KeyEvent)>>,
@@ -84,7 +82,7 @@ impl EditorView {
         surface: &mut Surface,
         is_focused: bool,
     ) {
-        let mut inner = view.inner_area(doc);
+        let inner = view.inner_area(doc);
         let area = view.area;
         let theme = &editor.theme;
         let config = editor.config();
@@ -177,33 +175,16 @@ impl EditorView {
             Box::new(highlights)
         };
 
-        match &doc.document_type {
-            helix_view::document::DocumentType::File => {
-                Self::render_gutter(
-                    editor,
-                    doc,
-                    view,
-                    view.area,
-                    theme,
-                    is_focused,
-                    &mut line_decorations,
-                );
-            }
-            helix_view::document::DocumentType::Refactor {
-                matches,
-                line_map: _,
-            } => {
-                inner = area.clip_bottom(match config.bufferline {
-                    helix_view::editor::BufferLine::Always => 0,
-                    helix_view::editor::BufferLine::Multiple if editor.documents.len() > 1 => 0,
-                    _ => 1,
-                });
-                self.render_document_names(surface, &inner, view.offset, matches);
-                inner = area.clip_left(REFACTOR_NAME_WIDTH).clip_bottom(1);
-            }
-        }
+        Self::render_gutter(
+            editor,
+            doc,
+            view,
+            view.area,
+            theme,
+            is_focused,
+            &mut line_decorations,
+        );
 
-        Self::render_text_highlights(doc, view.offset, inner, surface, theme, highlights, &config);
         if is_focused {
             let cursor = doc
                 .selection(view.id)
@@ -305,34 +286,6 @@ impl EditorView {
         text_annotations.collect_overlay_highlights(range)
     }
 
-    fn render_document_names(
-        &self,
-        surface: &mut Surface,
-        area: &Rect,
-        offset: helix_core::Position,
-        matches: &std::collections::HashMap<PathBuf, Vec<(usize, String)>>,
-    ) {
-        let mut start = 0;
-        let mut count = 0;
-        for (key, value) in matches {
-            for (line, _) in value {
-                if start >= offset.row && area.y + count < area.height {
-                    let text = key.display().to_string() + ":" + line.to_string().as_str();
-                    surface.set_string_truncated(
-                        area.x as u16,
-                        area.y + count as u16,
-                        &text,
-                        REFACTOR_NAME_WIDTH as usize,
-                        |_| Style::default().fg(helix_view::theme::Color::Magenta),
-                        true,
-                        true,
-                    );
-                    count += 1;
-                }
-                start += 1;
-            }
-        }
-    }
     /// Get syntax highlights for a document in a view represented by the first line
     /// and column (`offset`) and the last line. This is done instead of using a view
     /// directly to enable rendering syntax highlighted docs anywhere (eg. picker preview)
