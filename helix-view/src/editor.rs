@@ -274,6 +274,28 @@ pub struct Config {
     /// Whether to color modes with different colors. Defaults to `false`.
     pub color_modes: bool,
     pub soft_wrap: SoftWrap,
+    pub jump_mode: JumpModeConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct JumpModeConfig {
+    /// Whether or not to dim the view when in jump mode. Defaults to `true`.
+    pub dim_during_jump: bool,
+    /// How many characters the user should type before labelling the targets.
+    pub num_chars_before_label: u8,
+    /// Keys used in labels. Should be convertible to u8
+    pub jump_keys: String,
+}
+
+impl Default for JumpModeConfig {
+    fn default() -> Self {
+        JumpModeConfig {
+            dim_during_jump: true,
+            num_chars_before_label: 1,
+            jump_keys: String::from("jwetovxqpdygfblzhckisuranm"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -764,6 +786,7 @@ impl Default for Config {
             indent_guides: IndentGuidesConfig::default(),
             color_modes: false,
             soft_wrap: SoftWrap::default(),
+            jump_mode: JumpModeConfig::default(),
         }
     }
 }
